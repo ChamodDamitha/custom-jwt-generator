@@ -17,6 +17,7 @@ import org.wso2.carbon.apimgt.api.APIManagementException;
 import org.wso2.carbon.apimgt.gateway.dto.JWTInfoDto;
 import org.wso2.carbon.apimgt.gateway.handlers.security.jwt.generator.APIMgtGatewayJWTGeneratorImpl;
 import org.wso2.carbon.apimgt.gateway.handlers.security.jwt.generator.AbstractAPIMgtGatewayJWTGenerator;
+import org.wso2.carbon.apimgt.impl.APIConstants;
 import org.wso2.carbon.apimgt.impl.APIManagerConfiguration;
 import org.wso2.carbon.apimgt.impl.APIManagerConfigurationService;
 import org.wso2.carbon.apimgt.impl.dto.JWTConfigurationDto;
@@ -42,10 +43,6 @@ public class CustomJwtGenerator extends APIMgtGatewayJWTGeneratorImpl {
 
     private static final Log log = LogFactory.getLog(CustomJwtGenerator.class);
 
-    private final String ADMIN_USERNAME = "admin";
-    private final String ADMIN_PASSWORD = "admin";
-    private final String KEY_MANAGER_IP = "localhost";
-    private final String KEY_MANAGER_PORT = "9443";
     private APIManagerConfigurationService apiManagerConfigurationService;
 
     @Override
@@ -58,8 +55,10 @@ public class CustomJwtGenerator extends APIMgtGatewayJWTGeneratorImpl {
         int tenantId = APIUtil.getTenantId(username);
         String tenantDomain = APIUtil.getTenantDomainFromTenantId(tenantId);
 
-        String userInfoEndpoint = "https://" + KEY_MANAGER_IP + ":" + KEY_MANAGER_PORT +
-                getTenantAwareContext(tenantDomain).trim() + "/keymanager-operations/user-info";
+        APIManagerConfiguration apiManagerConfiguration =
+                this.apiManagerConfigurationService.getAPIManagerConfiguration();
+
+        String userInfoEndpoint = getUserInfoEndpoint(apiManagerConfiguration, tenantDomain);
 
         try {
             UserClient userClient = Feign.builder()
@@ -67,7 +66,9 @@ public class CustomJwtGenerator extends APIMgtGatewayJWTGeneratorImpl {
                     .encoder(new GsonEncoder())
                     .decoder(new GsonDecoder())
                     .logger(new Slf4jLogger())
-                    .requestInterceptor(new BasicAuthRequestInterceptor(ADMIN_USERNAME, ADMIN_PASSWORD))
+                    .requestInterceptor(new BasicAuthRequestInterceptor(
+                            apiManagerConfiguration.getFirstProperty(APIConstants.API_KEY_VALIDATOR_USERNAME),
+                            apiManagerConfiguration.getFirstProperty(APIConstants.API_KEY_VALIDATOR_PASSWORD)))
                     .requestInterceptor(new TenantHeaderInterceptor(tenantDomain))
                     .errorDecoder(new KMClientErrorDecoder())
                     .target(UserClient.class, userInfoEndpoint);
@@ -79,8 +80,6 @@ public class CustomJwtGenerator extends APIMgtGatewayJWTGeneratorImpl {
                 userinfo.setDomain(tenantAwareUserName.split(CarbonConstants.DOMAIN_SEPARATOR)[0]);
             }
 
-            APIManagerConfiguration apiManagerConfiguration =
-                    this.apiManagerConfigurationService.getAPIManagerConfiguration();
             JWTConfigurationDto jwtConfigurationDto = apiManagerConfiguration.getJwtConfigurationDto();
             String dialectURI = jwtConfigurationDto.getConsumerDialectUri();
             if (!StringUtils.isEmpty(dialectURI)) {
@@ -123,5 +122,12 @@ public class CustomJwtGenerator extends APIMgtGatewayJWTGeneratorImpl {
             return "/t/".concat(tenantDomain);
         }
         return "";
+    }
+
+    private String getUserInfoEndpoint(APIManagerConfiguration apiManagerConfiguration, String tenantDomain) {
+        return apiManagerConfiguration.getFirstProperty(APIConstants.API_KEY_VALIDATOR_URL)
+                .split("/services/")[0] +
+                getTenantAwareContext(tenantDomain).trim() +
+                "/keymanager-operations/user-info";
     }
 }
